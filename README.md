@@ -6,15 +6,33 @@ A userscript for bidding in eric's Auto Equip Auction threads on the E-Hentai fo
 
 ## Install / 安裝
 
-1. Install a userscript manager such as [Tampermonkey](https://www.tampermonkey.net/).
-   先安裝 Tampermonkey 等使用者腳本管理器。
-2. Open the link below; the manager will offer to install it.
-   開啟下面的連結，管理器會跳出安裝畫面。
+1. Install [Tampermonkey](https://www.tampermonkey.net/) for your browser and finish the setup it asks for
+   (some browsers require you to allow userscripts / extensions developer mode).
+   安裝瀏覽器用的 Tampermonkey，並完成它要求的設定（部分瀏覽器需要允許執行使用者腳本或開啟擴充功能的開發人員模式）。
+2. Open [Install eric's Auction Helper](https://raw.githubusercontent.com/ericericsw/eric-s-auction-helper/main/auction-helper.user.js).
+   開啟上面的安裝連結。
+3. Click **Install** in Tampermonkey, then open or reload an auction thread.
+   在 Tampermonkey 的畫面按 **Install（安裝）**，再開啟或重新整理拍賣討論串。
 
-   <https://raw.githubusercontent.com/ericericsw/eric-s-auction-helper/main/auction-helper.user.js>
+If the link only shows the source code, Tampermonkey is not enabled or not allowed to run userscripts yet.
+Check its settings, then open the link again.
 
-Updates are picked up automatically by the manager.
-之後的新版會由管理器自動更新。
+如果連結只顯示原始碼，表示 Tampermonkey 尚未啟用或還不能執行使用者腳本；請檢查設定後再開一次連結。
+
+## Updates / 更新
+
+- The install link never changes. Tampermonkey checks it for new versions on its own and updates the script.
+  安裝連結不會變。Tampermonkey 會自動從這個連結檢查新版並更新。
+- To check right away: open the Tampermonkey menu and choose **Check for userscript updates**.
+  想立即檢查：開啟 Tampermonkey 選單，選 **Check for userscript updates（檢查使用者腳本更新）**。
+- The current version is shown in the `Auction Helper` line of each auction thread's first post.
+  Compare it with the version in your Tampermonkey dashboard.
+  每個拍賣討論串第一篇的 `Auction Helper` 列會顯示目前的版本號，可以和 Tampermonkey 管理頁的版本對照。
+
+For maintainers: every release must raise `@version` and replace `auction-helper.user.js` on `main`.
+The auction threads read the version from that line.
+
+維護者：每次發布都要調高 `@version`，並覆蓋 `main` 上的 `auction-helper.user.js`；拍賣討論串顯示的版本號就是讀這一行。
 
 ## Features / 功能
 
@@ -29,6 +47,13 @@ Updates are picked up automatically by the manager.
 
 It only activates in eric's auction threads.
 只在 eric 的拍賣討論串中啟用。
+
+## Credits / 致謝
+
+Thanks to sparroff (original), SIRIUSs (current), and CornerCactus (contributor) of
+[Noni's DIY Auction Helper](https://github.com/TetsuOrb/nonis-diy-auction-helper).
+
+感謝 Noni's DIY Auction Helper 的 sparroff（原作者）、SIRIUSs（現任維護者）與 CornerCactus（貢獻者）。
 
 ## License
 
