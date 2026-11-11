@@ -44,6 +44,8 @@ The auction threads read the version from that line.
   支援 k/m/b 金額寫法，並檢查是否低於底價。
 - One click to copy the `Auction Bid` text, or open MoogleMail with it filled in.
   一鍵複製 `Auction Bid` 格式，或開啟 MoogleMail 自動帶入。
+- Automatically freezes mail-sending and copy buttons during `Intake`, `Pending` (settling), and `Close` phases to prevent unnecessary MoogleMails, while keeping item selection and price calculation active.
+  在收件期（`Intake`）、結算中（`Pending`）與已結案（`Close`）狀態下自動凍結發信與複製按鈕，避免寄出非必要 MM（仍可勾選品項與試算金額）。
 
 It only activates in eric's auction threads.
 只在 eric 的拍賣討論串中啟用。
