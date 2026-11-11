@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         eric's Auction Helper
 // @namespace    https://forums.e-hentai.org/
-// @version      1.2.0
-// @description  在 E-Hentai 論壇拍賣討論串的每個拍賣品項左側加入勾選框、右側即時顯示設定金額，並提供可收合的懸浮喊價視窗（支援中英雙語切換、k/m/b 金額解析、底價檢核、一鍵複製 Auction Bid 格式與開啟 MoogleMail 自動帶入）。
+// @version      1.3.0
+// @description  在 E-Hentai 論壇拍賣討論串的每個拍賣品項左側加入勾選框、右側即時顯示設定金額，並提供可收合的懸浮喊價視窗（支援中英雙語切換、k/m/b 金額解析、底價檢核、一鍵複製 Auction Bid 格式與開啟 MoogleMail 自動帶入；於 Intake/Pending/Close 階段自動凍結發信與複製功能）。
 // @author       eric
 // @match        https://forums.e-hentai.org/*showtopic*
 // @match        https://hentaiverse.org/?s=Bazaar&ss=mm&filter=new*
@@ -40,17 +40,26 @@
             collapseBtnTitle: 'Collapse panel to the right',
             langBtnLabel: '🌐 EN',
             langBtnTitle: 'Current language: EN (Click to switch to 中文)',
-            intakeWarning: '⚠️ <b>Intake Phase Notice</b>: Item IDs shown now are temporary Equip IDs (for seller <code>Auction Set</code> / <code>Auction Cancel</code> only). Official IDs (e.g. <code>001One01</code>) will be assigned when Bidding opens.',
+            intakeWarning: '⚠️ <b>Intake Phase (Bidding Not Open)</b>: Item IDs shown now are temporary Equip IDs (for seller <code>Auction Set</code> / <code>Auction Cancel</code> only). Official IDs (e.g. <code>001One01</code>) will be assigned when Bidding opens. <b>Mail & copy functions are frozen</b> (item selection & price calculation remain available).',
+            pendingWarning: '🔒 <b>Settling / Delivery in Progress (Pending)</b>: Bidding has ended for this session. <b>Mail & copy functions are frozen</b> to avoid unnecessary MoogleMails (item selection & price calculation remain available).',
+            closedWarning: '🔒 <b>Session Closed (Close)</b>: This auction session is completed and archived. <b>Mail & copy functions are frozen</b> to avoid unnecessary MoogleMails (item selection & price calculation remain available).',
+            frozenBtnTitle: (phase) => phase === 'close'
+                ? 'Disabled: Session is Closed (no bidding allowed)'
+                : phase === 'pending'
+                    ? 'Disabled: Session is in Pending / Settlement phase (bidding has ended)'
+                    : 'Disabled: Session is in Intake phase (bidding has not opened yet)',
             copyRcptBtn: '📋 Copy Rcpt',
             copyRcptBtnTitle: (shop) => `Copy recipient "${shop}" to clipboard`,
             copySubjBtn: '📋 Copy Subject',
             copySubjBtnTitle: 'Copy fixed subject "Auction Bid" to clipboard',
             copyBidsBtn: (count) => count > 0 ? `📋 Copy Bid (${count})` : '📋 Copy Bid',
+            copyBidsBtnFrozen: (count) => count > 0 ? `🔒 Copy Bid (${count})` : '🔒 Copy Bid',
             copyBidsBtnInvalid: (errCount) => `⚠️ Copy Bid (${errCount} invalid)`,
             copyBidsBtnTitle: 'Generate auction bid lines and copy to clipboard',
             selectAllBtn: 'Select All',
             clearAllBtn: 'Clear',
             openMmBtn: '✉️ Auto fill in MoogleMail',
+            openMmBtnFrozen: '🔒 Auto fill in MoogleMail',
             openMmBtnTitle: 'Open HentaiVerse MoogleMail (legacy mode &hvut=disabled) and auto-fill recipient, subject & bid lines',
             defaultStatusHint: '<span>Units: <code>k</code> / <code>m</code> / <code>b</code> or <code>start</code> / <code>cancel</code> / <code>mybid</code></span>',
             footerRecipient: (shop) => `To: <b>${shop}</b> | Subject: <b>Auction Bid</b>`,
@@ -101,17 +110,26 @@
             collapseBtnTitle: '向右收起視窗',
             langBtnLabel: '🌐 中文',
             langBtnTitle: '目前語系：中文（點擊切換為 EN）',
-            intakeWarning: '⚠️ <b>目前為 Intake 收件期</b>：品項編號為暫時裝備 ID（僅供賣家 <code>Auction Set</code> / <code>Auction Cancel</code> 使用）；正式開標（Bidding）後將換成如 <code>001One01</code> 的正式編號。',
+            intakeWarning: '⚠️ <b>目前為 Intake 收件期（尚未開標）</b>：品項編號為暫時裝備 ID（僅供賣家 <code>Auction Set</code> / <code>Auction Cancel</code> 使用），正式開標（Bidding）後將換成如 <code>001One01</code> 的正式編號。<b>已凍結發信與複製功能</b>（仍可勾選品項與試算金額）。',
+            pendingWarning: '🔒 <b>目前為結算交割中（Pending）</b>：本場次已截標並進入結算交割階段，不再接受出價。<b>已凍結發信與複製功能</b>以避免製造非必要 MM（仍可勾選品項與試算金額）。',
+            closedWarning: '🔒 <b>本場次已結案（Close）</b>：拍賣與交割皆已結清歸檔，不再接受出價。<b>已凍結發信與複製功能</b>以避免製造非必要 MM（仍可勾選品項與試算金額）。',
+            frozenBtnTitle: (phase) => phase === 'close'
+                ? '已凍結：本場次已結案（Close），不再接受出價'
+                : phase === 'pending'
+                    ? '已凍結：本場次結算交割中（Pending），已停止收受出價'
+                    : '已凍結：目前為收件期（Intake），尚未開放出價',
             copyRcptBtn: '📋 複製收件人',
             copyRcptBtnTitle: (shop) => `複製收件人 "${shop}" 至剪貼簿`,
             copySubjBtn: '📋 複製主旨',
             copySubjBtnTitle: '複製拍賣出價固定主旨 "Auction Bid" 至剪貼簿',
             copyBidsBtn: (count) => count > 0 ? `📋 複製喊價 (${count})` : '📋 複製喊價',
+            copyBidsBtnFrozen: (count) => count > 0 ? `🔒 複製喊價 (${count})` : '🔒 複製喊價',
             copyBidsBtnInvalid: (errCount) => `⚠️ 複製喊價 (${errCount} 筆有誤)`,
             copyBidsBtnTitle: '產生符合拍賣系統格式的喊價內文並複製到剪貼簿',
             selectAllBtn: '全選',
             clearAllBtn: '清空',
             openMmBtn: '✉️ Auto fill in MoogleMail',
+            openMmBtnFrozen: '🔒 Auto fill in MoogleMail',
             openMmBtnTitle: '開啟 HentaiVerse MoogleMail 寫信頁面（自動帶入 hvut=disabled 相容模式）並填入收件人、主旨與喊價內文',
             defaultStatusHint: '<span>支援單位: <code>k</code> / <code>m</code> / <code>b</code> 或 <code>start</code> / <code>cancel</code> / <code>mybid</code></span>',
             footerRecipient: (shop) => `收件人: <b>${shop}</b> | 主旨: <b>Auction Bid</b>`,
@@ -338,14 +356,24 @@
             document.documentElement.innerHTML.match(/var\s+ipb_input_t\s*=\s*"(\d+)"/);
         const topicId = topicMatch ? topicMatch[1] : (location.pathname.slice(-32) || 'local');
 
-        const isIntakeTitle = /\[Intake\]/i.test(titleText) || /\[Intake\]/i.test(mainTitleText);
+        const combinedTitle = `${titleText} ${mainTitleText}`;
+        let titlePhase = null;
+        if (/\[\s*Closed?\s*\]/i.test(combinedTitle)) {
+            titlePhase = 'close';
+        } else if (/\[\s*Pending\s*\]/i.test(combinedTitle)) {
+            titlePhase = 'pending';
+        } else if (/\[\s*Intake\s*\]/i.test(combinedTitle)) {
+            titlePhase = 'intake';
+        } else if (/\[\s*Bidding\s*\]/i.test(combinedTitle)) {
+            titlePhase = 'bidding';
+        }
 
         return {
             isVerifiedThread: isTitleMatched || isAuthorMatched,
             isAuthorMatched,
             topicId,
             shopAccount: shopAccount || 'HVEquipAuction',
-            isIntakeTitle
+            titlePhase
         };
     }
 
@@ -403,6 +431,7 @@
                 const sellerMatch = nextText.match(/\(Seller\s*:\s*([^)]+)\)/i);
                 const statsText = statsMatch ? statsMatch[1].trim() : '';
                 const sellerName = sellerMatch ? sellerMatch[1].trim() : '';
+                const hasResult = /-\s*start\s*:\s*[\d,]+\s+Result\s*:/i.test(nextText);
 
                 const equipName = (linkEl.textContent || '').trim();
                 const colorSpan = linkEl.querySelector('span[style*="color"]');
@@ -414,6 +443,36 @@
                 const idBracketText = prevText.slice(matchIndex);
 
                 prevNode.nodeValue = leadingText;
+
+                // 收集同行後續行內節點（例如 Pending / Close 階段的 Result: <span>成交 / Sold</span> Bidders:n），
+                // 避免即時金額標籤插在 Result: 與結果文字中間
+                const trailingNodes = [];
+                let cursor = nextNode.nextSibling;
+                while (cursor) {
+                    if (cursor.nodeType === Node.ELEMENT_NODE) {
+                        const tag = cursor.tagName.toUpperCase();
+                        if (
+                            tag === 'BR' ||
+                            tag === 'UL' ||
+                            tag === 'OL' ||
+                            tag === 'DIV' ||
+                            tag === 'P' ||
+                            tag === 'TABLE' ||
+                            tag === 'HR' ||
+                            tag === 'BLOCKQUOTE' ||
+                            (tag === 'A' && (cursor.getAttribute('href') || '').includes('hentaiverse.org/equip/'))
+                        ) {
+                            break;
+                        }
+                    } else if (cursor.nodeType === Node.TEXT_NODE) {
+                        if (/\[[A-Za-z0-9]+\]\s*$/.test(cursor.nodeValue || '')) {
+                            break;
+                        }
+                    }
+                    const nextCursor = cursor.nextSibling;
+                    trailingNodes.push(cursor);
+                    cursor = nextCursor;
+                }
 
                 // 建立包裹容器，讓整行項目可以進入「被選上模式」
                 const rowWrapper = document.createElement('span');
@@ -437,12 +496,14 @@
                 rowWrapper.appendChild(idTextNode);
                 rowWrapper.appendChild(linkEl);
                 rowWrapper.appendChild(nextNode);
+                trailingNodes.forEach((node) => rowWrapper.appendChild(node));
                 rowWrapper.appendChild(inlineBadge);
 
                 seenIds.add(itemId);
                 items.push({
                     itemId,
                     isTempId: /^\d+$/.test(itemId),
+                    hasResult,
                     equipName,
                     equipUrl: linkEl.href,
                     equipColor,
@@ -467,8 +528,51 @@
         return;
     }
 
-    const hasTempIds = catalogItems.some((it) => it.isTempId);
-    const isIntakePhase = threadMeta.isIntakeTitle || hasTempIds;
+    /**
+     * 依拍賣系統規格書 (AUC-FRM-020 §4.5.1 / AUC-DLST-100 §4.4.7 / AUC-STM-020 §6.0) 判定討論串階段：
+     * - Title 標記: [Intake] / [Bidding] / [Pending] / [Close]
+     * - Post #1 公告: Session Status: Intake (收件期) / Bidding (競標期) / Pending (結算交割中) / Closed (已結清)
+     * - 狀態貼文: Current Phase: INTAKE / BIDDING / PENDING / CLOSE
+     * - 品項列特徵: 含 Result: 代表已進入結算後 (pending / close)；純數字 ID 代表收件期 (intake)
+     */
+    function detectThreadPhase(meta, items) {
+        const phases = new Set();
+        if (meta.titlePhase) {
+            phases.add(meta.titlePhase);
+        }
+
+        const posts = document.querySelectorAll('div.postcolor');
+        posts.forEach((postEl) => {
+            if (meta.isAuthorMatched && !isShopAuthoredPost(postEl)) {
+                return;
+            }
+            const text = postEl.textContent || '';
+
+            const statusMatch = text.match(/Session\s+Status\s*:\s*(Intake|Bidding|Pending|Closed?)\b/i);
+            if (statusMatch) {
+                const raw = statusMatch[1].toLowerCase();
+                phases.add(raw.startsWith('close') ? 'close' : raw);
+            }
+
+            const phaseMatch = text.match(/Current\s+Phase\s*:\s*(INTAKE|BIDDING|PENDING|CLOSED?)\b/i);
+            if (phaseMatch) {
+                const raw = phaseMatch[1].toLowerCase();
+                phases.add(raw.startsWith('close') ? 'close' : raw);
+            }
+        });
+
+        const hasSettledResults = items.some((it) => it.hasResult);
+        const hasTempIds = items.some((it) => it.isTempId);
+
+        if (phases.has('close')) return 'close';
+        if (phases.has('pending') || hasSettledResults) return 'pending';
+        if (phases.has('intake') || hasTempIds) return 'intake';
+        return 'bidding';
+    }
+
+    const threadPhase = detectThreadPhase(threadMeta, catalogItems);
+    // 非 bidding 階段（intake 收件期 / pending 結算交割中 / close 已結案）皆凍結發信與複製功能，避免製造非必要 MM
+    const isBiddingFrozen = threadPhase !== 'bidding';
 
     // =========================================================================
     // 3. 價格解析與驗證（嚴格對齊拍賣系統規格 AUC-BIZ-040 / AUC-CMD-070）
@@ -878,7 +982,7 @@
             color: #fff;
         }
 
-        /* 收件期 Intake 提醒橫幅 */
+        /* 場次階段提醒橫幅 (Intake / Pending / Close) */
         .hv-auc-intake-banner {
             background: rgba(255, 183, 3, 0.14);
             border-bottom: 1px solid rgba(255, 183, 3, 0.35);
@@ -886,6 +990,16 @@
             padding: 6px 10px;
             font-size: 11px;
             line-height: 1.4;
+        }
+        .hv-auc-intake-banner.hv-auc-phase-pending {
+            background: rgba(255, 123, 0, 0.16);
+            border-bottom-color: rgba(255, 153, 0, 0.42);
+            color: #ffc078;
+        }
+        .hv-auc-intake-banner.hv-auc-phase-close {
+            background: rgba(230, 57, 70, 0.16);
+            border-bottom-color: rgba(230, 57, 70, 0.42);
+            color: #ff8787;
         }
 
         /* 框上方控制列 (Copy 按鈕區) */
@@ -1163,11 +1277,11 @@
     `;
     panelEl.appendChild(headerEl);
 
-    let intakeBannerEl = null;
-    if (isIntakePhase) {
-        intakeBannerEl = document.createElement('div');
-        intakeBannerEl.className = 'hv-auc-intake-banner';
-        panelEl.appendChild(intakeBannerEl);
+    let phaseBannerEl = null;
+    if (isBiddingFrozen) {
+        phaseBannerEl = document.createElement('div');
+        phaseBannerEl.className = `hv-auc-intake-banner hv-auc-phase-${threadPhase}`;
+        panelEl.appendChild(phaseBannerEl);
     }
 
     const toolbarEl = document.createElement('div');
@@ -1296,19 +1410,28 @@
         collapseBtnEl.textContent = dict.collapseBtn;
         collapseBtnEl.title = dict.collapseBtnTitle;
 
-        if (intakeBannerEl) {
-            intakeBannerEl.innerHTML = dict.intakeWarning;
+        if (phaseBannerEl) {
+            if (threadPhase === 'close') {
+                phaseBannerEl.innerHTML = dict.closedWarning;
+            } else if (threadPhase === 'pending') {
+                phaseBannerEl.innerHTML = dict.pendingWarning;
+            } else {
+                phaseBannerEl.innerHTML = dict.intakeWarning;
+            }
         }
 
+        const frozenTitle = isBiddingFrozen ? dict.frozenBtnTitle(threadPhase) : '';
         copyRcptBtn.textContent = dict.copyRcptBtn;
-        copyRcptBtn.title = dict.copyRcptBtnTitle(threadMeta.shopAccount);
+        copyRcptBtn.disabled = isBiddingFrozen;
+        copyRcptBtn.title = isBiddingFrozen ? frozenTitle : dict.copyRcptBtnTitle(threadMeta.shopAccount);
         copySubjBtn.textContent = dict.copySubjBtn;
-        copySubjBtn.title = dict.copySubjBtnTitle;
-        copyBidsBtn.title = dict.copyBidsBtnTitle;
+        copySubjBtn.disabled = isBiddingFrozen;
+        copySubjBtn.title = isBiddingFrozen ? frozenTitle : dict.copySubjBtnTitle;
+        copyBidsBtn.title = isBiddingFrozen ? frozenTitle : dict.copyBidsBtnTitle;
         selectAllBtn.textContent = dict.selectAllBtn;
         clearAllBtn.textContent = dict.clearAllBtn;
-        openMmBtn.textContent = dict.openMmBtn;
-        openMmBtn.title = dict.openMmBtnTitle;
+        openMmBtn.textContent = isBiddingFrozen ? dict.openMmBtnFrozen : dict.openMmBtn;
+        openMmBtn.title = isBiddingFrozen ? frozenTitle : dict.openMmBtnTitle;
 
         if (!statusTimer) {
             statusMsgEl.innerHTML = dict.defaultStatusHint;
@@ -1341,10 +1464,16 @@
         });
 
         totalCrEl.textContent = dict.footerTotal(totalCredits.toLocaleString('en-US'));
-        copyBidsBtn.disabled = count === 0;
-        openMmBtn.disabled = count === 0;
+        copyRcptBtn.disabled = isBiddingFrozen;
+        copySubjBtn.disabled = isBiddingFrozen;
+        copyBidsBtn.disabled = isBiddingFrozen || count === 0;
+        openMmBtn.disabled = isBiddingFrozen || count === 0;
 
-        if (invalidCount > 0) {
+        if (isBiddingFrozen) {
+            copyBidsBtn.textContent = invalidCount > 0
+                ? dict.copyBidsBtnInvalid(invalidCount)
+                : dict.copyBidsBtnFrozen(count);
+        } else if (invalidCount > 0) {
             copyBidsBtn.textContent = dict.copyBidsBtnInvalid(invalidCount);
         } else {
             copyBidsBtn.textContent = dict.copyBidsBtn(count);
@@ -1561,16 +1690,19 @@
     }
 
     copyRcptBtn.addEventListener('click', async () => {
+        if (isBiddingFrozen) return;
         await copyTextToClipboard(threadMeta.shopAccount);
         showStatusMessage(t().msgCopiedRcpt(threadMeta.shopAccount), 'ok');
     });
 
     copySubjBtn.addEventListener('click', async () => {
+        if (isBiddingFrozen) return;
         await copyTextToClipboard('Auction Bid');
         showStatusMessage(t().msgCopiedSubj, 'ok');
     });
 
     copyBidsBtn.addEventListener('click', async () => {
+        if (isBiddingFrozen) return;
         const dict = t();
         const result = buildBidLinesResult();
         if (result.selectedCount === 0) {
@@ -1605,6 +1737,7 @@
     });
 
     openMmBtn.addEventListener('click', async () => {
+        if (isBiddingFrozen) return;
         const dict = t();
         const result = buildBidLinesResult();
         if (result.selectedCount === 0) {
