@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         eric's Auction Helper
 // @namespace    https://forums.e-hentai.org/
-// @version      1.4.0
+// @version      1.4.1
 // @description  在 E-Hentai 論壇拍賣討論串的每個拍賣品項左側加入勾選框、右側即時顯示設定金額，並提供可收合的懸浮喊價視窗（支援中英雙語切換、k/m/b 金額解析、底價檢核、一鍵複製 Auction Bid 格式與開啟 MoogleMail 自動帶入；於 Intake/Pending/Close 階段自動凍結發信與複製功能）。
 // @author       eric
 // @match        https://forums.e-hentai.org/*showtopic*
@@ -452,11 +452,55 @@
         return curr;
     }
 
+    const ROW_WRAPPER_TAG = 'hv-auc-row';
+    const INLINE_BADGE_TAG = 'hv-auc-badge';
+    const INLINE_LABEL_TAG = 'hv-auc-label';
+    const INLINE_STATUS_TAG = 'hv-auc-status';
+    const AUCTION_INTERNAL_CLASSES = [
+        'hv-auc-checkbox',
+        'hv-auc-inline-badge',
+        'hv-auc-inline-input',
+        'hv-auc-inline-label',
+        'hv-auc-inline-status'
+    ];
+    const AUCTION_INTERNAL_SELECTOR = AUCTION_INTERNAL_CLASSES.map((c) => `.${c}`).join(', ');
+
+    function isAuctionInternalNode(node) {
+        if (!node || node.nodeType !== Node.ELEMENT_NODE) return false;
+        const el = node;
+        if (!el.classList) return false;
+        return AUCTION_INTERNAL_CLASSES.some((cls) => el.classList.contains(cls));
+    }
+
+    /**
+     * 清理因其他腳本（如 Hentaiverse 漢化 normalizeStyledTextInPostcolor）剝除 <span> 標籤後，
+     * 殘留於貼文內未受 .hv-auc-item-row 包裹的孤兒勾選框與徽章節點，防止重複產生兩個勾選框
+     */
+    function cleanupOrphanedAuctionNodes(rootEl) {
+        if (!rootEl || !rootEl.querySelectorAll) return;
+        const nodes = rootEl.querySelectorAll(AUCTION_INTERNAL_SELECTOR);
+        nodes.forEach((node) => {
+            if (!node.closest('.hv-auc-item-row')) {
+                node.remove();
+                return;
+            }
+            if (
+                node.classList &&
+                (node.classList.contains('hv-auc-inline-input') ||
+                    node.classList.contains('hv-auc-inline-label') ||
+                    node.classList.contains('hv-auc-inline-status')) &&
+                !node.closest('.hv-auc-inline-badge')
+            ) {
+                node.remove();
+            }
+        });
+    }
+
     /**
      * 擷取裝備名稱顏色，並略過其他漢化腳本為品質標籤（如 ☯无双☯ / ✪传奇✪）注入的亮底黑字樣式
      */
-    function extractEquipColor(linkEl) {
-        if (!linkEl) return '#FF9900';
+    function extractEquipColor(linkEl, fallbackColor = '#FF9900') {
+        if (!linkEl) return fallbackColor;
         const spans = Array.from(linkEl.querySelectorAll('span[style*="color"]'));
         if (linkEl.parentElement && linkEl.parentElement.tagName === 'SPAN' && linkEl.parentElement.style && linkEl.parentElement.style.color) {
             spans.unshift(linkEl.parentElement);
@@ -471,7 +515,7 @@
                 return sp.style.color;
             }
         }
-        return '#FF9900';
+        return fallbackColor;
     }
 
     /**
@@ -483,15 +527,21 @@
         const anchorNode = findInlineAnchorForLink(linkEl, postEl);
         if (!anchorNode || !anchorNode.parentNode) return null;
 
-        // 1. 向前收集同行行內節點，尋找 `[品項ID]`（相容其他腳本在連結前插入圖示或包裹節點）
+        // 1. 向前收集同行行內節點，尋找 `[品項ID]`（相容其他腳本在連結前插入圖示或包裹節點，並自動清除殘留孤兒節點）
         const prevLineNodes = [];
         let p = anchorNode.previousSibling;
         while (p) {
+            const prevSibling = p.previousSibling;
             if (isLineBoundaryNode(p) || containsOtherEquipLink(p, linkEl.href)) {
                 break;
             }
+            if (isAuctionInternalNode(p)) {
+                p.remove();
+                p = prevSibling;
+                continue;
+            }
             prevLineNodes.unshift(p);
-            p = p.previousSibling;
+            p = prevSibling;
         }
 
         const idRegex = /[\[【]\s*([A-Za-z0-9]+)\s*[\]】]/g;
@@ -526,8 +576,14 @@
         let cursor = anchorNode.nextSibling;
 
         while (cursor) {
+            const nextCursor = cursor.nextSibling;
             if (isLineBoundaryNode(cursor) || containsOtherEquipLink(cursor, linkEl.href)) {
                 break;
+            }
+            if (isAuctionInternalNode(cursor)) {
+                cursor.remove();
+                cursor = nextCursor;
+                continue;
             }
             if (cursor.nodeType === Node.TEXT_NODE) {
                 const val = cursor.nodeValue || '';
@@ -547,7 +603,7 @@
                 }
             }
             trailingNodes.push(cursor);
-            cursor = cursor.nextSibling;
+            cursor = nextCursor;
         }
 
         if (trailingNodes.length === 0) return null;
@@ -605,8 +661,8 @@
             }
         }
 
-        // 建立包裹容器，讓整行項目可以進入「被選上模式」
-        const rowWrapper = document.createElement('span');
+        // 建立包裹容器（使用自訂標籤而非 <span>，避免被漢化腳本 normalizeStyledTextInPostcolor 的 /<span[^>]*>/gi 剝除）
+        const rowWrapper = document.createElement(ROW_WRAPPER_TAG);
         rowWrapper.className = 'hv-auc-item-row';
         rowWrapper.dataset.itemId = itemId;
 
@@ -617,8 +673,8 @@
         checkbox.dataset.itemId = itemId;
         checkbox.title = t().checkboxTitle(itemId);
 
-        // 右側即時顯示當前設定金額的標籤（勾選時顯示於該項目最右側）
-        const inlineBadge = document.createElement('span');
+        // 右側即時顯示當前設定金額的標籤（使用自訂標籤而非 <span>）
+        const inlineBadge = document.createElement(INLINE_BADGE_TAG);
         inlineBadge.className = 'hv-auc-inline-badge';
         inlineBadge.dataset.itemId = itemId;
 
@@ -663,6 +719,8 @@
             if (threadMeta.isAuthorMatched && !isShopAuthoredPost(postEl)) {
                 return;
             }
+
+            cleanupOrphanedAuctionNodes(postEl);
 
             const links = Array.from(postEl.querySelectorAll('a[href*="hentaiverse.org/equip/"]'));
             if (links.length === 0) return;
@@ -1604,15 +1662,21 @@
         if (!item.rowWrapper || !item.rowWrapper.isConnected) {
             let liveRow = document.querySelector(`.hv-auc-item-row[data-item-id="${item.itemId}"]`);
 
-            // 若其他腳本還原了未包裹前的原始 HTML，重新掃描並包裹未處理的裝備連結
+            // 若其他腳本還原了未包裹前的原始 HTML 或剝除了包裹容器，先清理殘留孤兒節點再重新包裹
             if (!liveRow) {
+                const activeIds = new Set(
+                    Array.from(document.querySelectorAll('.hv-auc-item-row[data-item-id]'))
+                        .map((el) => el.dataset.itemId)
+                        .filter(Boolean)
+                );
                 const posts = document.querySelectorAll('div.postcolor');
                 posts.forEach((postEl) => {
                     if (threadMeta.isAuthorMatched && !isShopAuthoredPost(postEl)) return;
+                    cleanupOrphanedAuctionNodes(postEl);
                     const links = Array.from(postEl.querySelectorAll('a[href*="hentaiverse.org/equip/"]'));
                     links.forEach((linkEl) => {
                         if (!linkEl.closest('.hv-auc-item-row')) {
-                            wrapSingleAuctionLink(linkEl, postEl, null);
+                            wrapSingleAuctionLink(linkEl, postEl, activeIds);
                         }
                     });
                 });
@@ -1622,25 +1686,37 @@
             if (liveRow) {
                 item.rowWrapper = liveRow;
 
-                let liveCb = liveRow.querySelector('.hv-auc-checkbox');
+                const allCbs = liveRow.querySelectorAll('.hv-auc-checkbox');
+                let liveCb = allCbs[0] || null;
+                if (allCbs.length > 1) {
+                    for (let i = 1; i < allCbs.length; i++) {
+                        allCbs[i].remove();
+                    }
+                }
                 if (!liveCb) {
                     liveCb = document.createElement('input');
                     liveCb.type = 'checkbox';
                     liveCb.className = 'hv-auc-checkbox';
                     liveCb.dataset.itemId = item.itemId;
                     liveRow.insertBefore(liveCb, liveRow.firstChild);
-                } else {
+                } else if (liveCb.dataset.itemId !== item.itemId) {
                     liveCb.dataset.itemId = item.itemId;
                 }
                 item.checkbox = liveCb;
 
-                let liveBadge = liveRow.querySelector('.hv-auc-inline-badge');
+                const allBadges = liveRow.querySelectorAll('.hv-auc-inline-badge');
+                let liveBadge = allBadges[0] || null;
+                if (allBadges.length > 1) {
+                    for (let i = 1; i < allBadges.length; i++) {
+                        allBadges[i].remove();
+                    }
+                }
                 if (!liveBadge) {
-                    liveBadge = document.createElement('span');
+                    liveBadge = document.createElement(INLINE_BADGE_TAG);
                     liveBadge.className = 'hv-auc-inline-badge';
                     liveBadge.dataset.itemId = item.itemId;
                     liveRow.appendChild(liveBadge);
-                } else {
+                } else if (liveBadge.dataset.itemId !== item.itemId) {
                     liveBadge.dataset.itemId = item.itemId;
                 }
                 item.inlineBadge = liveBadge;
@@ -1655,7 +1731,7 @@
                     item.equipName = latestName;
                     metaChanged = true;
                 }
-                const latestColor = extractEquipColor(liveLink);
+                const latestColor = extractEquipColor(liveLink, item.equipColor || '#FF9900');
                 if (latestColor && latestColor !== item.equipColor) {
                     item.equipColor = latestColor;
                     metaChanged = true;
@@ -1679,7 +1755,7 @@
         if (!labelEl || !inputEl || !statusEl) {
             badge.textContent = '';
 
-            labelEl = document.createElement('span');
+            labelEl = document.createElement(INLINE_LABEL_TAG);
             labelEl.className = 'hv-auc-inline-label';
 
             inputEl = document.createElement('input');
@@ -1688,13 +1764,13 @@
             inputEl.dataset.itemId = item.itemId;
             inputEl.placeholder = 'start';
 
-            statusEl = document.createElement('span');
+            statusEl = document.createElement(INLINE_STATUS_TAG);
             statusEl.className = 'hv-auc-inline-status';
 
             badge.appendChild(labelEl);
             badge.appendChild(inputEl);
             badge.appendChild(statusEl);
-        } else {
+        } else if (inputEl.dataset.itemId !== item.itemId) {
             inputEl.dataset.itemId = item.itemId;
         }
 
@@ -1711,9 +1787,16 @@
             const dict = t();
             const isSelected = selectedMap.has(item.itemId);
             if (item.checkbox) {
-                item.checkbox.checked = isSelected;
-                item.checkbox.defaultChecked = isSelected;
-                item.checkbox.title = dict.checkboxTitle(item.itemId);
+                if (item.checkbox.checked !== isSelected) {
+                    item.checkbox.checked = isSelected;
+                }
+                if (item.checkbox.defaultChecked !== isSelected) {
+                    item.checkbox.defaultChecked = isSelected;
+                }
+                const expectedTitle = dict.checkboxTitle(item.itemId);
+                if (item.checkbox.getAttribute('title') !== expectedTitle) {
+                    item.checkbox.title = expectedTitle;
+                }
             }
             if (item.rowWrapper) {
                 item.rowWrapper.classList.toggle('hv-auc-selected', isSelected);
@@ -1721,6 +1804,9 @@
             if (!item.inlineBadge) return;
 
             if (!isSelected) {
+                if (item.inlineBadge.childNodes.length > 0) {
+                    item.inlineBadge.textContent = '';
+                }
                 item.inlineBadge.classList.remove('hv-auc-inline-invalid');
                 return;
             }
@@ -1729,13 +1815,21 @@
             const res = validateBidInput(rawVal, item.reservePrice);
             const parts = ensureInlineBadgeChildren(item);
             if (parts) {
-                parts.labelEl.textContent = res.inlineLabel;
-                parts.inputEl.title = dict.inlineInputTitle;
+                if (parts.labelEl.textContent !== res.inlineLabel) {
+                    parts.labelEl.textContent = res.inlineLabel;
+                }
+                if (parts.inputEl.getAttribute('title') !== dict.inlineInputTitle) {
+                    parts.inputEl.title = dict.inlineInputTitle;
+                }
                 if (document.activeElement !== parts.inputEl && parts.inputEl.value !== rawVal) {
                     parts.inputEl.value = rawVal;
                 }
-                parts.inputEl.setAttribute('value', rawVal);
-                parts.statusEl.textContent = res.inlineStatus;
+                if (parts.inputEl.getAttribute('value') !== rawVal) {
+                    parts.inputEl.setAttribute('value', rawVal);
+                }
+                if (parts.statusEl.textContent !== res.inlineStatus) {
+                    parts.statusEl.textContent = res.inlineStatus;
+                }
             }
             item.inlineBadge.classList.toggle('hv-auc-inline-invalid', !res.valid);
         } finally {
@@ -1773,6 +1867,12 @@
         isInternalDomUpdate = true;
         let anyMetaChanged = false;
         try {
+            const posts = document.querySelectorAll('div.postcolor');
+            posts.forEach((postEl) => {
+                if (threadMeta.isAuthorMatched && !isShopAuthoredPost(postEl)) return;
+                cleanupOrphanedAuctionNodes(postEl);
+            });
+
             catalogItems.forEach((item) => {
                 if (syncItemWithLiveDom(item)) {
                     anyMetaChanged = true;
