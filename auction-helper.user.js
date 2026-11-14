@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         eric's Auction Helper
 // @namespace    https://forums.e-hentai.org/
-// @version      1.3.0
+// @version      1.3.1
 // @description  在 E-Hentai 論壇拍賣討論串的每個拍賣品項左側加入勾選框、右側即時顯示設定金額，並提供可收合的懸浮喊價視窗（支援中英雙語切換、k/m/b 金額解析、底價檢核、一鍵複製 Auction Bid 格式與開啟 MoogleMail 自動帶入；於 Intake/Pending/Close 階段自動凍結發信與複製功能）。
 // @author       eric
 // @match        https://forums.e-hentai.org/*showtopic*
@@ -346,7 +346,7 @@
             const uid = uidMatch ? uidMatch[1] : '';
             if (ALLOWED_SHOP_NAMES.has(name.toLowerCase()) || (uid && ALLOWED_SHOP_UIDS.has(uid))) {
                 isAuthorMatched = true;
-                shopAccount = name || 'HVEquipAuction';
+                shopAccount = ALLOWED_SHOP_NAMES.has(name.toLowerCase()) ? name : 'HVEquipAuction';
                 break;
             }
         }
@@ -384,6 +384,256 @@
         return;
     }
 
+    const LINE_BOUNDARY_TAGS = new Set([
+        'BR', 'DIV', 'P', 'UL', 'OL', 'LI', 'TABLE', 'THEAD', 'TBODY', 'TR', 'TD', 'TH',
+        'HR', 'BLOCKQUOTE', 'PRE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6'
+    ]);
+    const START_PRICE_REGEX = /[-–—－]\s*(?:start|起[標标拍始]|開[始標标]|底[價价]|初始)\s*[:：]\s*([\d,]+)/i;
+    const NEXT_ITEM_TAIL_REGEX = /(\r?\n\s*[\[【]\s*[A-Za-z0-9]+\s*[\]】]\s*)$/;
+
+    function isLineBoundaryNode(node) {
+        if (!node || node.nodeType !== Node.ELEMENT_NODE) return false;
+        const el = node;
+        if (LINE_BOUNDARY_TAGS.has(el.tagName.toUpperCase())) return true;
+        if (el.classList && el.classList.contains('hv-auc-item-row')) return true;
+        return false;
+    }
+
+    function containsOtherEquipLink(node, currentHref = '') {
+        if (!node || node.nodeType !== Node.ELEMENT_NODE) return false;
+        const el = node;
+        if (el.tagName.toUpperCase() === 'A') {
+            const href = el.getAttribute('href') || '';
+            if (href.includes('hentaiverse.org/equip/')) {
+                return currentHref ? el.href !== currentHref : true;
+            }
+        }
+        if (!el.querySelectorAll) return false;
+        const links = el.querySelectorAll('a[href*="hentaiverse.org/equip/"]');
+        for (const a of links) {
+            if (!currentHref || a.href !== currentHref) return true;
+        }
+        return false;
+    }
+
+    /**
+     * 若其他腳本或 BBCode 僅針對單一裝備連結包裹了行內容器（如 <span> / <strong>），
+     * 向上尋找該單一連結的最外層行內節點，以便正確取得同行前後兄弟節點
+     */
+    function findInlineAnchorForLink(linkEl, postEl) {
+        let curr = linkEl;
+        while (curr.parentElement && curr.parentElement !== postEl) {
+            const parent = curr.parentElement;
+            if (isLineBoundaryNode(parent)) break;
+            if (parent.querySelector && parent.querySelector('br')) break;
+            const equipLinks = parent.querySelectorAll ? parent.querySelectorAll('a[href*="hentaiverse.org/equip/"]') : [];
+            if (equipLinks.length > 1) break;
+            const parentText = parent.textContent || '';
+            if (/[\[【]\s*[A-Za-z0-9]+\s*[\]】]/.test(parentText)) break;
+            if (START_PRICE_REGEX.test(parentText)) break;
+            curr = parent;
+        }
+        return curr;
+    }
+
+    /**
+     * 擷取裝備名稱顏色，並略過其他漢化腳本為品質標籤（如 ☯无双☯ / ✪传奇✪）注入的亮底黑字樣式
+     */
+    function extractEquipColor(linkEl) {
+        if (!linkEl) return '#FF9900';
+        const spans = Array.from(linkEl.querySelectorAll('span[style*="color"]'));
+        if (linkEl.parentElement && linkEl.parentElement.tagName === 'SPAN' && linkEl.parentElement.style && linkEl.parentElement.style.color) {
+            spans.unshift(linkEl.parentElement);
+        }
+        for (const sp of spans) {
+            const c = (sp.style && sp.style.color ? sp.style.color : '').trim().toLowerCase();
+            const bg = (sp.style && (sp.style.backgroundColor || sp.style.background) ? (sp.style.backgroundColor || sp.style.background) : '').trim();
+            if (bg && (c === '#000000' || c === '#000' || c === 'black' || c === 'rgb(0, 0, 0)')) {
+                continue;
+            }
+            if (c && c !== '#000000' && c !== '#000' && c !== 'black' && c !== 'rgb(0, 0, 0)') {
+                return sp.style.color;
+            }
+        }
+        return '#FF9900';
+    }
+
+    /**
+     * 包裹單一裝備連結所在的品項列；容許其他腳本先行改寫裝備名稱、插入 span/icon 或拆分文字節點
+     */
+    function wrapSingleAuctionLink(linkEl, postEl, seenIds) {
+        if (!linkEl || linkEl.closest('.hv-auc-item-row')) return null;
+
+        const anchorNode = findInlineAnchorForLink(linkEl, postEl);
+        if (!anchorNode || !anchorNode.parentNode) return null;
+
+        // 1. 向前收集同行行內節點，尋找 `[品項ID]`（相容其他腳本在連結前插入圖示或包裹節點）
+        const prevLineNodes = [];
+        let p = anchorNode.previousSibling;
+        while (p) {
+            if (isLineBoundaryNode(p) || containsOtherEquipLink(p, linkEl.href)) {
+                break;
+            }
+            prevLineNodes.unshift(p);
+            p = p.previousSibling;
+        }
+
+        const idRegex = /[\[【]\s*([A-Za-z0-9]+)\s*[\]】]/g;
+        let matchedId = '';
+        let idNodeIndex = -1;
+        let idMatchIndexInText = -1;
+
+        for (let i = prevLineNodes.length - 1; i >= 0; i--) {
+            const node = prevLineNodes[i];
+            const txt = node.nodeType === Node.TEXT_NODE ? (node.nodeValue || '') : (node.textContent || '');
+            idRegex.lastIndex = 0;
+            let m;
+            let lastMatch = null;
+            while ((m = idRegex.exec(txt)) !== null) {
+                lastMatch = m;
+            }
+            if (lastMatch) {
+                matchedId = lastMatch[1].trim();
+                idNodeIndex = i;
+                idMatchIndexInText = lastMatch.index;
+                break;
+            }
+        }
+
+        if (!matchedId) return null;
+        if (seenIds && seenIds.has(matchedId)) return null;
+
+        // 2. 向後收集同行所有後續行內節點（容許其他腳本在 `(Lv ...)` 或結果文字內插入 `<span>` 標籤）
+        const trailingNodes = [];
+        let splitNextItemNode = null;
+        let splitNextItemIndex = -1;
+        let cursor = anchorNode.nextSibling;
+
+        while (cursor) {
+            if (isLineBoundaryNode(cursor) || containsOtherEquipLink(cursor, linkEl.href)) {
+                break;
+            }
+            if (cursor.nodeType === Node.TEXT_NODE) {
+                const val = cursor.nodeValue || '';
+                const tailMatch = val.match(NEXT_ITEM_TAIL_REGEX);
+                if (tailMatch) {
+                    const beforeTail = val.slice(0, tailMatch.index);
+                    if (beforeTail.trim().length === 0) {
+                        break;
+                    }
+                    splitNextItemNode = cursor;
+                    splitNextItemIndex = tailMatch.index;
+                    trailingNodes.push(cursor);
+                    break;
+                }
+                if (/[\[【]\s*[A-Za-z0-9]+\s*[\]】]\s*$/.test(val) && !START_PRICE_REGEX.test(val)) {
+                    break;
+                }
+            }
+            trailingNodes.push(cursor);
+            cursor = cursor.nextSibling;
+        }
+
+        if (trailingNodes.length === 0) return null;
+
+        const nextText = trailingNodes
+            .map((n) => {
+                if (n === splitNextItemNode && splitNextItemIndex >= 0) {
+                    return (n.nodeValue || '').slice(0, splitNextItemIndex);
+                }
+                return n.textContent || '';
+            })
+            .join('');
+
+        // 後置文字必須包含 `- start:<起標價>`（相容中文化改寫）
+        const startMatch = nextText.match(START_PRICE_REGEX);
+        if (!startMatch) return null;
+
+        const itemId = matchedId;
+        const reserveRaw = startMatch[1].replace(/,/g, '');
+        const reservePrice = parseInt(reserveRaw, 10);
+        if (isNaN(reservePrice)) return null;
+
+        const statsMatch = nextText.match(/\(((?:Lv|Level|等級|等级)\s*[^)]+)\)/i);
+        const sellerMatch = nextText.match(/\((?:Seller|賣家|卖家)\s*[:：]\s*([^)]+)\)/i);
+        const statsText = statsMatch ? statsMatch[1].trim() : '';
+        const sellerName = sellerMatch ? sellerMatch[1].trim() : '';
+        const hasResult = /[-–—－]\s*(?:start|起[標标拍始]|開[始標标]|底[價价]|初始)\s*[:：]\s*[\d,]+\s+(?:Result|結果|结果)\s*[:：]/i.test(nextText);
+
+        const equipName = (linkEl.textContent || '').trim();
+        const equipColor = extractEquipColor(linkEl);
+
+        // 若尾端文字節點連著下一筆品項的 `\n[ID] `，在此安全切分
+        if (splitNextItemNode && splitNextItemIndex >= 0 && splitNextItemNode.parentNode) {
+            const fullVal = splitNextItemNode.nodeValue || '';
+            splitNextItemNode.nodeValue = fullVal.slice(0, splitNextItemIndex);
+            const nextItemLeadingTextNode = document.createTextNode(fullVal.slice(splitNextItemIndex));
+            splitNextItemNode.parentNode.insertBefore(nextItemLeadingTextNode, splitNextItemNode.nextSibling);
+        }
+
+        // 將前置文字節點拆分為「前面的換行/空白」與「`[ID] ` 本身」
+        const idOriginNode = prevLineNodes[idNodeIndex];
+        const nodesBeforeAnchor = [];
+        if (idOriginNode.nodeType === Node.TEXT_NODE) {
+            const fullPrevText = idOriginNode.nodeValue || '';
+            const leadingText = fullPrevText.slice(0, idMatchIndexInText);
+            const idBracketText = fullPrevText.slice(idMatchIndexInText);
+            idOriginNode.nodeValue = leadingText;
+            nodesBeforeAnchor.push(document.createTextNode(idBracketText));
+            for (let j = idNodeIndex + 1; j < prevLineNodes.length; j++) {
+                nodesBeforeAnchor.push(prevLineNodes[j]);
+            }
+        } else {
+            for (let j = idNodeIndex; j < prevLineNodes.length; j++) {
+                nodesBeforeAnchor.push(prevLineNodes[j]);
+            }
+        }
+
+        // 建立包裹容器，讓整行項目可以進入「被選上模式」
+        const rowWrapper = document.createElement('span');
+        rowWrapper.className = 'hv-auc-item-row';
+        rowWrapper.dataset.itemId = itemId;
+
+        // 左側選擇方框（加上 data-item-id 以支援事件委派，防止其他腳本覆寫 innerHTML 後遺失事件）
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.className = 'hv-auc-checkbox';
+        checkbox.dataset.itemId = itemId;
+        checkbox.title = t().checkboxTitle(itemId);
+
+        // 右側即時顯示當前設定金額的標籤（勾選時顯示於該項目最右側）
+        const inlineBadge = document.createElement('span');
+        inlineBadge.className = 'hv-auc-inline-badge';
+        inlineBadge.dataset.itemId = itemId;
+
+        anchorNode.parentNode.insertBefore(rowWrapper, anchorNode);
+        rowWrapper.appendChild(checkbox);
+        nodesBeforeAnchor.forEach((n) => rowWrapper.appendChild(n));
+        rowWrapper.appendChild(anchorNode);
+        trailingNodes.forEach((node) => rowWrapper.appendChild(node));
+        rowWrapper.appendChild(inlineBadge);
+
+        if (seenIds) {
+            seenIds.add(itemId);
+        }
+
+        return {
+            itemId,
+            isTempId: /^\d+$/.test(itemId),
+            hasResult,
+            equipName,
+            equipUrl: linkEl.href,
+            equipColor,
+            statsText,
+            sellerName,
+            reservePrice,
+            reserveFormatted: startMatch[1],
+            rowWrapper,
+            checkbox,
+            inlineBadge
+        };
+    }
+
     /**
      * 掃描所有店家貼文中的拍賣品項，回傳結構化陣列並包裹 DOM 節點
      */
@@ -402,119 +652,10 @@
             if (links.length === 0) return;
 
             links.forEach((linkEl) => {
-                if (linkEl.closest('.hv-auc-item-row')) return;
-
-                const prevNode = linkEl.previousSibling;
-                const nextNode = linkEl.nextSibling;
-                if (!prevNode || prevNode.nodeType !== Node.TEXT_NODE) return;
-                if (!nextNode || nextNode.nodeType !== Node.TEXT_NODE) return;
-
-                const prevText = prevNode.nodeValue || '';
-                const nextText = nextNode.nodeValue || '';
-
-                // 前置文字尾端必須是 `[品項ID] `，例如 `[318101690] ` 或 `[001One01] `
-                const idMatch = prevText.match(/\[([A-Za-z0-9]+)\]\s*$/);
-                if (!idMatch) return;
-
-                // 後置文字必須包含 `- start:<起標價>`
-                const startMatch = nextText.match(/-\s*start\s*:\s*([\d,]+)/i);
-                if (!startMatch) return;
-
-                const itemId = idMatch[1].trim();
-                if (seenIds.has(itemId)) return;
-
-                const reserveRaw = startMatch[1].replace(/,/g, '');
-                const reservePrice = parseInt(reserveRaw, 10);
-                if (isNaN(reservePrice)) return;
-
-                const statsMatch = nextText.match(/\((Lv\s+[^)]+)\)/i);
-                const sellerMatch = nextText.match(/\(Seller\s*:\s*([^)]+)\)/i);
-                const statsText = statsMatch ? statsMatch[1].trim() : '';
-                const sellerName = sellerMatch ? sellerMatch[1].trim() : '';
-                const hasResult = /-\s*start\s*:\s*[\d,]+\s+Result\s*:/i.test(nextText);
-
-                const equipName = (linkEl.textContent || '').trim();
-                const colorSpan = linkEl.querySelector('span[style*="color"]');
-                const equipColor = colorSpan ? colorSpan.style.color : '#FF9900';
-
-                // 將 prevNode 拆分為「前面的換行/空白」與「`[ID] ` 本身」
-                const matchIndex = prevText.lastIndexOf('[' + idMatch[1] + ']');
-                const leadingText = prevText.slice(0, matchIndex);
-                const idBracketText = prevText.slice(matchIndex);
-
-                prevNode.nodeValue = leadingText;
-
-                // 收集同行後續行內節點（例如 Pending / Close 階段的 Result: <span>成交 / Sold</span> Bidders:n），
-                // 避免即時金額標籤插在 Result: 與結果文字中間
-                const trailingNodes = [];
-                let cursor = nextNode.nextSibling;
-                while (cursor) {
-                    if (cursor.nodeType === Node.ELEMENT_NODE) {
-                        const tag = cursor.tagName.toUpperCase();
-                        if (
-                            tag === 'BR' ||
-                            tag === 'UL' ||
-                            tag === 'OL' ||
-                            tag === 'DIV' ||
-                            tag === 'P' ||
-                            tag === 'TABLE' ||
-                            tag === 'HR' ||
-                            tag === 'BLOCKQUOTE' ||
-                            (tag === 'A' && (cursor.getAttribute('href') || '').includes('hentaiverse.org/equip/'))
-                        ) {
-                            break;
-                        }
-                    } else if (cursor.nodeType === Node.TEXT_NODE) {
-                        if (/\[[A-Za-z0-9]+\]\s*$/.test(cursor.nodeValue || '')) {
-                            break;
-                        }
-                    }
-                    const nextCursor = cursor.nextSibling;
-                    trailingNodes.push(cursor);
-                    cursor = nextCursor;
+                const parsedItem = wrapSingleAuctionLink(linkEl, postEl, seenIds);
+                if (parsedItem) {
+                    items.push(parsedItem);
                 }
-
-                // 建立包裹容器，讓整行項目可以進入「被選上模式」
-                const rowWrapper = document.createElement('span');
-                rowWrapper.className = 'hv-auc-item-row';
-                rowWrapper.dataset.itemId = itemId;
-
-                // 左側選擇方框
-                const checkbox = document.createElement('input');
-                checkbox.type = 'checkbox';
-                checkbox.className = 'hv-auc-checkbox';
-                checkbox.title = t().checkboxTitle(itemId);
-
-                const idTextNode = document.createTextNode(idBracketText);
-
-                // 右側即時顯示當前設定金額的標籤（勾選時顯示於該項目最右側）
-                const inlineBadge = document.createElement('span');
-                inlineBadge.className = 'hv-auc-inline-badge';
-
-                linkEl.parentNode.insertBefore(rowWrapper, linkEl);
-                rowWrapper.appendChild(checkbox);
-                rowWrapper.appendChild(idTextNode);
-                rowWrapper.appendChild(linkEl);
-                rowWrapper.appendChild(nextNode);
-                trailingNodes.forEach((node) => rowWrapper.appendChild(node));
-                rowWrapper.appendChild(inlineBadge);
-
-                seenIds.add(itemId);
-                items.push({
-                    itemId,
-                    isTempId: /^\d+$/.test(itemId),
-                    hasResult,
-                    equipName,
-                    equipUrl: linkEl.href,
-                    equipColor,
-                    statsText,
-                    sellerName,
-                    reservePrice,
-                    reserveFormatted: startMatch[1],
-                    rowWrapper,
-                    checkbox,
-                    inlineBadge
-                });
             });
         });
 
@@ -522,6 +663,7 @@
     }
 
     const catalogItems = scanAndWrapAuctionItems();
+    const catalogById = new Map(catalogItems.map((it) => [it.itemId, it]));
 
     // ★ 第二道防線：若頁面上沒有任何拍賣裝備項目，直接結束，絕不建立懸浮視窗
     if (catalogItems.length === 0) {
@@ -1376,25 +1518,144 @@
         return catalogItems.filter((it) => selectedMap.has(it.itemId));
     }
 
+    let isInternalDomUpdate = false;
+
+    /**
+     * 當其他腳本（如中文化腳本）透過 innerHTML 覆寫貼文 DOM 或改寫裝備字串後，
+     * 重新將 catalogItem 綁定至最新活體 DOM 節點，並同步最新裝備名稱與顏色
+     */
+    function syncItemWithLiveDom(item) {
+        if (!item) return false;
+        let metaChanged = false;
+
+        if (!item.rowWrapper || !item.rowWrapper.isConnected) {
+            let liveRow = document.querySelector(`.hv-auc-item-row[data-item-id="${item.itemId}"]`);
+
+            // 若其他腳本還原了未包裹前的原始 HTML，重新掃描並包裹未處理的裝備連結
+            if (!liveRow) {
+                const posts = document.querySelectorAll('div.postcolor');
+                posts.forEach((postEl) => {
+                    if (threadMeta.isAuthorMatched && !isShopAuthoredPost(postEl)) return;
+                    const links = Array.from(postEl.querySelectorAll('a[href*="hentaiverse.org/equip/"]'));
+                    links.forEach((linkEl) => {
+                        if (!linkEl.closest('.hv-auc-item-row')) {
+                            wrapSingleAuctionLink(linkEl, postEl, null);
+                        }
+                    });
+                });
+                liveRow = document.querySelector(`.hv-auc-item-row[data-item-id="${item.itemId}"]`);
+            }
+
+            if (liveRow) {
+                item.rowWrapper = liveRow;
+
+                let liveCb = liveRow.querySelector('.hv-auc-checkbox');
+                if (!liveCb) {
+                    liveCb = document.createElement('input');
+                    liveCb.type = 'checkbox';
+                    liveCb.className = 'hv-auc-checkbox';
+                    liveCb.dataset.itemId = item.itemId;
+                    liveRow.insertBefore(liveCb, liveRow.firstChild);
+                } else {
+                    liveCb.dataset.itemId = item.itemId;
+                }
+                item.checkbox = liveCb;
+
+                let liveBadge = liveRow.querySelector('.hv-auc-inline-badge');
+                if (!liveBadge) {
+                    liveBadge = document.createElement('span');
+                    liveBadge.className = 'hv-auc-inline-badge';
+                    liveBadge.dataset.itemId = item.itemId;
+                    liveRow.appendChild(liveBadge);
+                } else {
+                    liveBadge.dataset.itemId = item.itemId;
+                }
+                item.inlineBadge = liveBadge;
+            }
+        }
+
+        if (item.rowWrapper && item.rowWrapper.isConnected) {
+            const liveLink = item.rowWrapper.querySelector('a[href*="hentaiverse.org/equip/"]');
+            if (liveLink) {
+                const latestName = (liveLink.textContent || '').trim();
+                if (latestName && latestName !== item.equipName) {
+                    item.equipName = latestName;
+                    metaChanged = true;
+                }
+                const latestColor = extractEquipColor(liveLink);
+                if (latestColor && latestColor !== item.equipColor) {
+                    item.equipColor = latestColor;
+                    metaChanged = true;
+                }
+            }
+        }
+
+        return metaChanged;
+    }
+
     /**
      * 更新單一品項在貼文內「被選上模式」右側的即時金額徽章
      */
     function updatePostRowInlineBadge(item) {
-        const isSelected = selectedMap.has(item.itemId);
-        item.checkbox.checked = isSelected;
-        item.checkbox.title = t().checkboxTitle(item.itemId);
-        item.rowWrapper.classList.toggle('hv-auc-selected', isSelected);
+        isInternalDomUpdate = true;
+        try {
+            syncItemWithLiveDom(item);
+            const isSelected = selectedMap.has(item.itemId);
+            if (item.checkbox) {
+                item.checkbox.checked = isSelected;
+                item.checkbox.defaultChecked = isSelected;
+                item.checkbox.title = t().checkboxTitle(item.itemId);
+            }
+            if (item.rowWrapper) {
+                item.rowWrapper.classList.toggle('hv-auc-selected', isSelected);
+            }
+            if (!item.inlineBadge) return;
 
-        if (!isSelected) {
-            item.inlineBadge.textContent = '';
-            item.inlineBadge.classList.remove('hv-auc-inline-invalid');
-            return;
+            if (!isSelected) {
+                item.inlineBadge.textContent = '';
+                item.inlineBadge.classList.remove('hv-auc-inline-invalid');
+                return;
+            }
+
+            const rawVal = selectedMap.get(item.itemId) ?? 'start';
+            const res = validateBidInput(rawVal, item.reservePrice);
+            item.inlineBadge.textContent = res.inlineText;
+            item.inlineBadge.classList.toggle('hv-auc-inline-invalid', !res.valid);
+        } finally {
+            isInternalDomUpdate = false;
         }
+    }
 
-        const rawVal = selectedMap.get(item.itemId) ?? 'start';
-        const res = validateBidInput(rawVal, item.reservePrice);
-        item.inlineBadge.textContent = res.inlineText;
-        item.inlineBadge.classList.toggle('hv-auc-inline-invalid', !res.valid);
+    /**
+     * 全量對齊貼文活體 DOM 與懸浮面板內的裝備名稱顯示
+     */
+    function reconcileCatalogWithLiveDom() {
+        if (isInternalDomUpdate) return;
+        isInternalDomUpdate = true;
+        let anyMetaChanged = false;
+        try {
+            catalogItems.forEach((item) => {
+                if (syncItemWithLiveDom(item)) {
+                    anyMetaChanged = true;
+                }
+                updatePostRowInlineBadge(item);
+            });
+
+            if (anyMetaChanged) {
+                const dict = t();
+                const nameLinks = listEl.querySelectorAll('.hv-auc-equip-name[data-item-id]');
+                nameLinks.forEach((el) => {
+                    const id = el.dataset.itemId;
+                    const item = id ? catalogById.get(id) : null;
+                    if (!item) return;
+                    el.textContent = item.equipName;
+                    el.style.color = item.equipColor || '#ff9900';
+                    el.title = dict.scrollLinkTitle(item.equipName);
+                });
+            }
+        } finally {
+            isInternalDomUpdate = false;
+        }
     }
 
     /**
@@ -1548,11 +1809,14 @@
 
             const nameLink = document.createElement('a');
             nameLink.className = 'hv-auc-equip-name';
+            nameLink.dataset.itemId = item.itemId;
             nameLink.style.color = item.equipColor || '#ff9900';
             nameLink.textContent = item.equipName;
             nameLink.title = dict.scrollLinkTitle(item.equipName);
             nameLink.addEventListener('click', (e) => {
                 e.preventDefault();
+                syncItemWithLiveDom(item);
+                if (!item.rowWrapper) return;
                 item.rowWrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 item.rowWrapper.classList.remove('hv-auc-flash');
                 void item.rowWrapper.offsetWidth;
@@ -1619,25 +1883,66 @@
         updateSummaryAndCounts();
     }
 
-    // 綁定貼文內每個品項的勾選事件
-    catalogItems.forEach((item) => {
-        item.checkbox.addEventListener('change', () => {
-            if (item.checkbox.checked) {
-                if (!selectedMap.has(item.itemId)) {
-                    selectedMap.set(item.itemId, 'start');
-                }
-                saveState();
-                if (rootEl.classList.contains('hv-auc-collapsed')) {
-                    togglePanelCollapsed(false);
-                }
-                renderSelectedList(item.itemId);
-            } else {
-                selectedMap.delete(item.itemId);
-                saveState();
-                renderSelectedList();
+    // 使用事件委派處理貼文內勾選框變更（即使其他腳本以 post.innerHTML 覆寫重建 DOM 也不會失效）
+    document.addEventListener('change', (e) => {
+        const target = e.target;
+        if (!target || !target.classList || !target.classList.contains('hv-auc-checkbox')) return;
+
+        const rowEl = target.closest ? target.closest('.hv-auc-item-row') : null;
+        const itemId = (target.dataset && target.dataset.itemId) || (rowEl && rowEl.dataset ? rowEl.dataset.itemId : '');
+        if (!itemId) return;
+
+        const item = catalogById.get(itemId);
+        if (!item) return;
+
+        syncItemWithLiveDom(item);
+
+        if (target.checked) {
+            if (!selectedMap.has(item.itemId)) {
+                selectedMap.set(item.itemId, 'start');
             }
-        });
+            saveState();
+            if (rootEl.classList.contains('hv-auc-collapsed')) {
+                togglePanelCollapsed(false);
+            }
+            renderSelectedList(item.itemId);
+        } else {
+            selectedMap.delete(item.itemId);
+            saveState();
+            renderSelectedList();
+        }
     });
+
+    // 監聽店家貼文區塊的 DOM 變動（例如漢化腳本延遲執行或使用者點擊「原文/譯文切換」覆寫 post.innerHTML）
+    if (typeof MutationObserver === 'function') {
+        let reconcileScheduled = false;
+        const postObserver = new MutationObserver((mutations) => {
+            if (isInternalDomUpdate || reconcileScheduled) return;
+            const hasExternalMutation = mutations.some((m) => {
+                const tNode = m.target;
+                if (tNode && tNode.nodeType === Node.ELEMENT_NODE) {
+                    const el = tNode;
+                    if (el.classList && (el.classList.contains('hv-auc-inline-badge') || el.classList.contains('hv-auc-checkbox'))) {
+                        return false;
+                    }
+                }
+                return true;
+            });
+            if (!hasExternalMutation) return;
+
+            reconcileScheduled = true;
+            Promise.resolve().then(() => {
+                reconcileScheduled = false;
+                reconcileCatalogWithLiveDom();
+            });
+        });
+
+        const posts = document.querySelectorAll('div.postcolor');
+        posts.forEach((postEl) => {
+            if (threadMeta.isAuthorMatched && !isShopAuthoredPost(postEl)) return;
+            postObserver.observe(postEl, { childList: true, subtree: true, characterData: true });
+        });
+    }
 
     // =========================================================================
     // 8. 剪貼簿複製與 MoogleMail 開啟功能
