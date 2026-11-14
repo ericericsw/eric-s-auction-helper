@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         eric's Auction Helper
 // @namespace    https://forums.e-hentai.org/
-// @version      1.3.1
+// @version      1.4.0
 // @description  在 E-Hentai 論壇拍賣討論串的每個拍賣品項左側加入勾選框、右側即時顯示設定金額，並提供可收合的懸浮喊價視窗（支援中英雙語切換、k/m/b 金額解析、底價檢核、一鍵複製 Auction Bid 格式與開啟 MoogleMail 自動帶入；於 Intake/Pending/Close 階段自動凍結發信與複製功能）。
 // @author       eric
 // @match        https://forums.e-hentai.org/*showtopic*
@@ -91,6 +91,14 @@
             inlineBadgeAmount: (token, cr) => `✓ Bid: ${token} (${cr} Cr)`,
             inlineBadgeCmd: (token) => `✓ Cmd: ${token}`,
             inlineBadgeInvalid: (raw, err) => `⚠️ ${raw || '(empty)'} — ${err}`,
+            inlineLabelBid: '✓ Bid:',
+            inlineLabelCmd: '✓ Cmd:',
+            inlineLabelInvalid: '⚠️ Bid:',
+            inlineStatusCr: (cr) => `(${cr} Cr)`,
+            inlineStatusCancel: '(Cancel bid)',
+            inlineStatusMybid: '(Query bid)',
+            inlineStatusInvalid: (err) => `— ${err}`,
+            inlineInputTitle: 'Edit bid amount directly (syncs with floating panel)',
             msgSelectAtLeastOne: 'Please select at least one equipment item first!',
             msgFixErrorsFirst: (count, firstErr) => `❌ ${count} item(s) have invalid amount: ${firstErr}`,
             msgCopiedRcpt: (shop) => `✅ Copied recipient "${shop}" to clipboard!`,
@@ -161,6 +169,14 @@
             inlineBadgeAmount: (token, cr) => `✓ 出價: ${token} (${cr} Cr)`,
             inlineBadgeCmd: (token) => `✓ 指令: ${token}`,
             inlineBadgeInvalid: (raw, err) => `⚠️ ${raw || '(未填)'} — ${err}`,
+            inlineLabelBid: '✓ 出價:',
+            inlineLabelCmd: '✓ 指令:',
+            inlineLabelInvalid: '⚠️ 出價:',
+            inlineStatusCr: (cr) => `(${cr} Cr)`,
+            inlineStatusCancel: '(取消出價)',
+            inlineStatusMybid: '(查詢出價)',
+            inlineStatusInvalid: (err) => `— ${err}`,
+            inlineInputTitle: '直接編輯出價金額（與右側懸浮視窗即時同步）',
             msgSelectAtLeastOne: '請先勾選至少一項拍賣裝備！',
             msgFixErrorsFirst: (count, firstErr) => `❌ 有 ${count} 筆金額格式或底價不符：${firstErr}`,
             msgCopiedRcpt: (shop) => `✅ 已複製收件人 "${shop}" 至剪貼簿！`,
@@ -730,7 +746,9 @@
                 amountBigInt: null,
                 displayHint: dict.hintEmpty,
                 errorMsg: dict.errEmpty,
-                inlineText: dict.inlineBadgeInvalid('', dict.errEmpty)
+                inlineText: dict.inlineBadgeInvalid('', dict.errEmpty),
+                inlineLabel: dict.inlineLabelInvalid,
+                inlineStatus: dict.inlineStatusInvalid(dict.errEmpty)
             };
         }
 
@@ -747,7 +765,9 @@
                     amountBigInt: BigInt(reservePrice),
                     displayHint: dict.hintStart(reserveFormatted),
                     errorMsg: '',
-                    inlineText: dict.inlineBadgeStart('start', reserveFormatted)
+                    inlineText: dict.inlineBadgeStart('start', reserveFormatted),
+                    inlineLabel: dict.inlineLabelBid,
+                    inlineStatus: dict.inlineStatusCr(reserveFormatted)
                 };
             }
             if (lower === 'cancel') {
@@ -758,7 +778,9 @@
                     amountBigInt: 0n,
                     displayHint: dict.hintCancel,
                     errorMsg: '',
-                    inlineText: dict.inlineBadgeCmd('cancel')
+                    inlineText: dict.inlineBadgeCmd('cancel'),
+                    inlineLabel: dict.inlineLabelCmd,
+                    inlineStatus: dict.inlineStatusCancel
                 };
             }
             if (lower === 'mybid') {
@@ -769,7 +791,9 @@
                     amountBigInt: 0n,
                     displayHint: dict.hintMybid,
                     errorMsg: '',
-                    inlineText: dict.inlineBadgeCmd('mybid')
+                    inlineText: dict.inlineBadgeCmd('mybid'),
+                    inlineLabel: dict.inlineLabelCmd,
+                    inlineStatus: dict.inlineStatusMybid
                 };
             }
         }
@@ -783,7 +807,9 @@
                 amountBigInt: null,
                 displayHint: dict.hintCommaError,
                 errorMsg: dict.errComma,
-                inlineText: dict.inlineBadgeInvalid(trimmed, dict.errComma)
+                inlineText: dict.inlineBadgeInvalid(trimmed, dict.errComma),
+                inlineLabel: dict.inlineLabelInvalid,
+                inlineStatus: dict.inlineStatusInvalid(dict.errComma)
             };
         }
 
@@ -796,7 +822,9 @@
                 amountBigInt: null,
                 displayHint: dict.hintNegError,
                 errorMsg: dict.errNeg,
-                inlineText: dict.inlineBadgeInvalid(trimmed, dict.errNeg)
+                inlineText: dict.inlineBadgeInvalid(trimmed, dict.errNeg),
+                inlineLabel: dict.inlineLabelInvalid,
+                inlineStatus: dict.inlineStatusInvalid(dict.errNeg)
             };
         }
         if (trimmed.startsWith('+')) {
@@ -807,7 +835,9 @@
                 amountBigInt: null,
                 displayHint: dict.hintPlusError,
                 errorMsg: dict.errFormat,
-                inlineText: dict.inlineBadgeInvalid(trimmed, dict.errFormat)
+                inlineText: dict.inlineBadgeInvalid(trimmed, dict.errFormat),
+                inlineLabel: dict.inlineLabelInvalid,
+                inlineStatus: dict.inlineStatusInvalid(dict.errFormat)
             };
         }
 
@@ -821,7 +851,9 @@
                 amountBigInt: null,
                 displayHint: dict.hintFormatError,
                 errorMsg: dict.errFormat,
-                inlineText: dict.inlineBadgeInvalid(trimmed, dict.errFormat)
+                inlineText: dict.inlineBadgeInvalid(trimmed, dict.errFormat),
+                inlineLabel: dict.inlineLabelInvalid,
+                inlineStatus: dict.inlineStatusInvalid(dict.errFormat)
             };
         }
 
@@ -848,7 +880,9 @@
                 amountBigInt: null,
                 displayHint: dict.hintFractionError,
                 errorMsg: dict.errFraction,
-                inlineText: dict.inlineBadgeInvalid(token, dict.errFraction)
+                inlineText: dict.inlineBadgeInvalid(token, dict.errFraction),
+                inlineLabel: dict.inlineLabelInvalid,
+                inlineStatus: dict.inlineStatusInvalid(dict.errFraction)
             };
         }
 
@@ -865,7 +899,9 @@
                 amountBigInt: valBigInt,
                 displayHint: dict.hintRangeError,
                 errorMsg: dict.errRange,
-                inlineText: dict.inlineBadgeInvalid(normalizedToken, dict.errRange)
+                inlineText: dict.inlineBadgeInvalid(normalizedToken, dict.errRange),
+                inlineLabel: dict.inlineLabelInvalid,
+                inlineStatus: dict.inlineStatusInvalid(dict.errRange)
             };
         }
 
@@ -881,7 +917,9 @@
                 amountBigInt: valBigInt,
                 displayHint: dict.hintBelowReserve(reserveFormatted),
                 errorMsg: errStr,
-                inlineText: dict.inlineBadgeInvalid(normalizedToken, errStr)
+                inlineText: dict.inlineBadgeInvalid(normalizedToken, errStr),
+                inlineLabel: dict.inlineLabelInvalid,
+                inlineStatus: dict.inlineStatusInvalid(errStr)
             };
         }
 
@@ -892,7 +930,9 @@
             amountBigInt: valBigInt,
             displayHint: `= ${valFormatted} Cr`,
             errorMsg: '',
-            inlineText: dict.inlineBadgeAmount(normalizedToken, valFormatted)
+            inlineText: dict.inlineBadgeAmount(normalizedToken, valFormatted),
+            inlineLabel: dict.inlineLabelBid,
+            inlineStatus: dict.inlineStatusCr(valFormatted)
         };
     }
 
@@ -978,20 +1018,53 @@
             font-weight: bold;
             font-family: Consolas, Monaco, "Segoe UI", sans-serif;
             color: #ffd166;
-            background: rgba(20, 22, 34, 0.85);
+            background: rgba(20, 22, 34, 0.90);
             border: 1px solid rgba(255, 183, 3, 0.55);
             padding: 1px 6px;
             margin-left: 8px;
             border-radius: 4px;
             vertical-align: middle;
+            cursor: text;
         }
         .hv-auc-item-row.hv-auc-selected .hv-auc-inline-badge {
-            display: inline-block;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
         }
         .hv-auc-inline-badge.hv-auc-inline-invalid {
             color: #ff8787;
             border-color: rgba(255, 107, 107, 0.7);
-            background: rgba(60, 15, 20, 0.85);
+            background: rgba(60, 15, 20, 0.88);
+        }
+        .hv-auc-inline-label {
+            user-select: none;
+            white-space: nowrap;
+        }
+        .hv-auc-inline-input {
+            width: 72px;
+            box-sizing: border-box;
+            background: #10121d;
+            color: #ffffff;
+            border: 1px solid rgba(255, 183, 3, 0.65);
+            border-radius: 3px;
+            padding: 1px 5px;
+            font-size: 11px;
+            font-weight: bold;
+            font-family: Consolas, Monaco, monospace;
+            text-align: right;
+            outline: none;
+            line-height: 1.25;
+        }
+        .hv-auc-inline-input:focus {
+            border-color: #ffb703;
+            box-shadow: 0 0 0 2px rgba(255, 183, 3, 0.32);
+        }
+        .hv-auc-inline-badge.hv-auc-inline-invalid .hv-auc-inline-input {
+            border-color: #ff6b6b;
+            color: #ff8787;
+        }
+        .hv-auc-inline-status {
+            white-space: nowrap;
         }
         @keyframes hvAucFlashHighlight {
             0%   { box-shadow: 0 0 0 4px rgba(0, 212, 255, 0.9); background-color: rgba(0, 212, 255, 0.35); }
@@ -1594,17 +1667,53 @@
     }
 
     /**
-     * 更新單一品項在貼文內「被選上模式」右側的即時金額徽章
+     * 確保貼文右側徽章內具備可編輯輸入框與狀態節點
+     */
+    function ensureInlineBadgeChildren(item) {
+        if (!item || !item.inlineBadge) return null;
+        const badge = item.inlineBadge;
+        let labelEl = badge.querySelector('.hv-auc-inline-label');
+        let inputEl = badge.querySelector('.hv-auc-inline-input');
+        let statusEl = badge.querySelector('.hv-auc-inline-status');
+
+        if (!labelEl || !inputEl || !statusEl) {
+            badge.textContent = '';
+
+            labelEl = document.createElement('span');
+            labelEl.className = 'hv-auc-inline-label';
+
+            inputEl = document.createElement('input');
+            inputEl.type = 'text';
+            inputEl.className = 'hv-auc-inline-input';
+            inputEl.dataset.itemId = item.itemId;
+            inputEl.placeholder = 'start';
+
+            statusEl = document.createElement('span');
+            statusEl.className = 'hv-auc-inline-status';
+
+            badge.appendChild(labelEl);
+            badge.appendChild(inputEl);
+            badge.appendChild(statusEl);
+        } else {
+            inputEl.dataset.itemId = item.itemId;
+        }
+
+        return { labelEl, inputEl, statusEl };
+    }
+
+    /**
+     * 更新單一品項在貼文內「被選上模式」右側的可編輯金額徽章
      */
     function updatePostRowInlineBadge(item) {
         isInternalDomUpdate = true;
         try {
             syncItemWithLiveDom(item);
+            const dict = t();
             const isSelected = selectedMap.has(item.itemId);
             if (item.checkbox) {
                 item.checkbox.checked = isSelected;
                 item.checkbox.defaultChecked = isSelected;
-                item.checkbox.title = t().checkboxTitle(item.itemId);
+                item.checkbox.title = dict.checkboxTitle(item.itemId);
             }
             if (item.rowWrapper) {
                 item.rowWrapper.classList.toggle('hv-auc-selected', isSelected);
@@ -1612,17 +1721,47 @@
             if (!item.inlineBadge) return;
 
             if (!isSelected) {
-                item.inlineBadge.textContent = '';
                 item.inlineBadge.classList.remove('hv-auc-inline-invalid');
                 return;
             }
 
             const rawVal = selectedMap.get(item.itemId) ?? 'start';
             const res = validateBidInput(rawVal, item.reservePrice);
-            item.inlineBadge.textContent = res.inlineText;
+            const parts = ensureInlineBadgeChildren(item);
+            if (parts) {
+                parts.labelEl.textContent = res.inlineLabel;
+                parts.inputEl.title = dict.inlineInputTitle;
+                if (document.activeElement !== parts.inputEl && parts.inputEl.value !== rawVal) {
+                    parts.inputEl.value = rawVal;
+                }
+                parts.inputEl.setAttribute('value', rawVal);
+                parts.statusEl.textContent = res.inlineStatus;
+            }
             item.inlineBadge.classList.toggle('hv-auc-inline-invalid', !res.valid);
         } finally {
             isInternalDomUpdate = false;
+        }
+    }
+
+    /**
+     * 當使用者在貼文右側徽章直接編輯價格時，即時同步回右側懸浮視窗對應卡片
+     */
+    function syncFloatingCardFromInline(item, newVal) {
+        if (!item) return;
+        const v = validateBidInput(newVal, item.reservePrice);
+        const cardInput = listEl.querySelector(`.hv-auc-price-input[data-item-id="${item.itemId}"]`);
+        if (!cardInput) return;
+
+        if (document.activeElement !== cardInput && cardInput.value !== newVal) {
+            cardInput.value = newVal;
+        }
+        const card = cardInput.closest('.hv-auc-card');
+        if (card) {
+            card.classList.toggle('hv-auc-card-invalid', !v.valid);
+            const hintEl = card.querySelector('.hv-auc-price-hint');
+            if (hintEl) {
+                hintEl.textContent = v.displayHint;
+            }
         }
     }
 
@@ -1913,6 +2052,56 @@
         }
     });
 
+    // 使用事件委派處理貼文內右側價格預覽徽章的直接編輯與雙向同步
+    document.addEventListener('input', (e) => {
+        const target = e.target;
+        if (!target || !target.classList || !target.classList.contains('hv-auc-inline-input')) return;
+
+        const rowEl = target.closest ? target.closest('.hv-auc-item-row') : null;
+        const itemId = (target.dataset && target.dataset.itemId) || (rowEl && rowEl.dataset ? rowEl.dataset.itemId : '');
+        if (!itemId) return;
+
+        const item = catalogById.get(itemId);
+        if (!item) return;
+
+        const newVal = target.value;
+        selectedMap.set(item.itemId, newVal);
+        saveState();
+
+        updatePostRowInlineBadge(item);
+        syncFloatingCardFromInline(item, newVal);
+        updateSummaryAndCounts();
+    });
+
+    document.addEventListener('focusin', (e) => {
+        const target = e.target;
+        if (!target || !target.classList || !target.classList.contains('hv-auc-inline-input')) return;
+        if (typeof target.select === 'function') {
+            target.select();
+        }
+    });
+
+    document.addEventListener('keydown', (e) => {
+        const target = e.target;
+        if (!target || !target.classList || !target.classList.contains('hv-auc-inline-input')) return;
+        if (e.key === 'Enter' || e.key === 'Escape') {
+            e.preventDefault();
+            target.blur();
+        }
+    });
+
+    document.addEventListener('click', (e) => {
+        const target = e.target;
+        if (!target || !target.closest) return;
+        const badgeEl = target.closest('.hv-auc-inline-badge');
+        if (!badgeEl) return;
+        const inlineInput = badgeEl.querySelector('.hv-auc-inline-input');
+        if (inlineInput && target !== inlineInput) {
+            inlineInput.focus();
+            inlineInput.select();
+        }
+    });
+
     // 監聽店家貼文區塊的 DOM 變動（例如漢化腳本延遲執行或使用者點擊「原文/譯文切換」覆寫 post.innerHTML）
     if (typeof MutationObserver === 'function') {
         let reconcileScheduled = false;
@@ -1920,11 +2109,10 @@
             if (isInternalDomUpdate || reconcileScheduled) return;
             const hasExternalMutation = mutations.some((m) => {
                 const tNode = m.target;
-                if (tNode && tNode.nodeType === Node.ELEMENT_NODE) {
-                    const el = tNode;
-                    if (el.classList && (el.classList.contains('hv-auc-inline-badge') || el.classList.contains('hv-auc-checkbox'))) {
-                        return false;
-                    }
+                if (!tNode) return false;
+                const el = tNode.nodeType === Node.ELEMENT_NODE ? tNode : tNode.parentElement;
+                if (el && el.closest && (el.closest('.hv-auc-inline-badge') || (el.classList && el.classList.contains('hv-auc-checkbox')))) {
+                    return false;
                 }
                 return true;
             });
