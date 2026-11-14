@@ -1,0 +1,38 @@
+[b]Requirements:[/b]
+[list][*]Firefox or Chrome with Tampermonkey (or a compatible userscript manager with userscripts enabled)[/list]
+
+[b]Installation:[/b]
+[list=1][*]Make sure Tampermonkey is installed (and enabled / allowed to run userscripts in your browser).
+[*]Open the GitHub installation link below.
+[*]Confirm installation when prompted.[/list]
+
+[b]Link:[/b] The latest version of eric's Auction Helper is available through GitHub (and auto-updates from the same link).
+[url=https://raw.githubusercontent.com/ericericsw/eric-s-auction-helper/main/auction-helper.user.js]Auction Helper v1.4.1[/url]
+[url=https://github.com/ericericsw/eric-s-auction-helper]Repo Link[/url]
+
+[b]Features:[/b]
+[list][*]Adds a selection checkbox next to each auction item in eric's Auto Equip Auction threads and highlights selected rows
+[*]Displays an inline editable bid badge next to each selected item in the post with real-time two-way sync to the floating panel
+[*]Collapsible floating Auction Bid Helper panel with bilingual UI switching (English / 中文)
+[*]Parses and validates bid amounts ([code]k[/code] / [code]m[/code] / [code]b[/code] shorthand, whole Credits, and [code]start[/code] / [code]cancel[/code] / [code]mybid[/code] commands) and checks against each item's reserve ([code]start[/code]) price
+[*]Calculates total Credits across all valid selected items
+[*]One-click buttons to copy Recipient ([code]HVEquipAuction[/code]), Subject ([code]Auction Bid[/code]), and formatted bid lines, plus [b]Select All[/b] / [b]Clear[/b]
+[*]One-click [b]Auto fill in MoogleMail[/b] to open HV MoogleMail ([code]&hvut=disabled[/code]) in a new tab and auto-fill recipient, subject, and bid lines (also compatible with HV Utils' compose UI)
+[*]Automatically detects thread phases ([code]Intake[/code], [code]Bidding[/code], [code]Pending[/code], [code]Close[/code]) and freezes mail/copy actions outside [code]Bidding[/code] to prevent unnecessary MoogleMails while keeping item selection and price calculation active
+[*]Compatible with other forum userscripts (such as localization/equipment enhancers) that rewrite post DOM or item names[/list]
+
+[b]Additional information:[/b]
+[list][*]The script only activates in verified [code]eric's Auto Equip Auction[/code] threads (matching the official thread title format or shop account [code]HVEquipAuction[/code]) that contain auction equipment items.
+[*]Checking an item's box selects it with [code]start[/code] (its reserve price) by default and automatically expands the panel if collapsed.
+[*]You can edit bid amounts either in the floating panel or directly inside the inline badge next to the item in the post ([code]Enter[/code] or [code]Esc[/code] finishes inline editing).
+[*]In the floating panel, clicking an item's name smoothly scrolls to and flashes that item in the post, while clicking the 🔗 icon opens its equipment stats page in a new tab.
+[*]Selected items, bid inputs, panel collapsed state, and language preference are saved in browser/userscript storage, so reloading the thread keeps your draft.
+[*]Clicking [b]Auto fill in MoogleMail[/b] also copies the bid lines to your clipboard and opens MoogleMail pre-filled—just review the message and click [b]Send[/b] yourself.
+[*]Because the script's [code]@updateURL[/code] and [code]@downloadURL[/code] point to [code]main[/code], Tampermonkey will automatically check the install link for future updates (or you can trigger [b]Check for userscript updates[/b] in the Tampermonkey menu).[/list]
+
+[b]History:[/b]
+[list][*][url=https://raw.githubusercontent.com/ericericsw/eric-s-auction-helper/v1.4.1/auction-helper.user.js]1.4.1[/url]: Fixed duplicate checkboxes and orphaned inline badges caused by Hentaiverse localization scripts stripping [code]<span>[/code] tags
+[*][url=https://raw.githubusercontent.com/ericericsw/eric-s-auction-helper/v1.4.0/auction-helper.user.js]1.4.0[/url]: Made the inline bid badge next to selected items directly editable with real-time two-way sync to the floating panel
+[*][url=https://raw.githubusercontent.com/ericericsw/eric-s-auction-helper/v1.3.1/auction-helper.user.js]1.3.1[/url]: Prevented equipment selection failure when other scripts rewrite post DOM (added MutationObserver reconciliation, event delegation, and live item name/color syncing)
+[*][url=https://raw.githubusercontent.com/ericericsw/eric-s-auction-helper/v1.3.0/auction-helper.user.js]1.3.0[/url]: Added thread phase detection ([code]Intake[/code] / [code]Pending[/code] / [code]Close[/code]) to freeze mail & copy actions outside [code]Bidding[/code] while keeping selection and price calculation active
+[*][url=https://raw.githubusercontent.com/ericericsw/eric-s-auction-helper/v1.2.0/auction-helper.user.js]1.2.0[/url]: Initial GitHub release with item checkboxes, inline bid badges, collapsible EN/中文 floating panel, bid validation, clipboard copy, and MoogleMail auto-fill[/list]
